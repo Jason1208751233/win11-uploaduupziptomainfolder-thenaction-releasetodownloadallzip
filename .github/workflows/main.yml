@@ -4,10 +4,14 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/main.yml'
+      - 'uup.zip'
 
 permissions:
   contents: write
+
+concurrency:
+  group: build-iso
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -24,20 +28,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cabextract wimtools genisoimage chntpw aria2 unzip
-
-      - name: Patch genisoimage for large files
-        run: |
-          sudo mv /usr/bin/genisoimage /usr/bin/genisoimage.orig
-          printf '#!/bin/bash\nexec /usr/bin/genisoimage.orig -allow-limited-size "$@"\n' | sudo tee /usr/bin/genisoimage > /dev/null
-          sudo chmod +x /usr/bin/genisoimage
-          genisoimage --version
+          sudo apt-get install -y cabextract wimtools genisoimage chntpw aria2 unzip xorriso
 
       - name: Run UUP dump script
         run: |
           unzip -o uup.zip -d uup
           cd uup
           chmod +x uup_download_linux.sh
+          sed -i 's/\bgenisoimage\b/xorriso -as mkisofs/g' files/converter_multi
           ./uup_download_linux.sh
 
       - name: Locate and split ISO
@@ -46,10 +44,8 @@ jobs:
           echo "== Searching for generated ISO files =="
           find . -type f -iname "*.iso" -printf '%s %p\n' | sort -rn | head -20
 
-          # 递归查找当前目录及子目录中最大的 .iso 文件
           ISO=$(find . -type f -iname "*.iso" -printf '%s %p\n' | sort -rn | head -n1 | cut -d' ' -f2-)
 
-          # 兜底：如果当前目录没找到，往上一级（仓库根）再找
           if [ -z "$ISO" ]; then
             echo "Not found in ./ , searching parent directory..."
             ISO=$(find .. -maxdepth 2 -type f -iname "*.iso" -printf '%s %p\n' | sort -rn | head -n1 | cut -d' ' -f2-)
@@ -57,7 +53,6 @@ jobs:
 
           if [ -z "$ISO" ]; then
             echo "Error: ISO file was not generated!"
-            echo "== Directory contents for debugging =="
             find . .. -maxdepth 3 -type f -printf '%p\n' | head -100
             exit 1
           fi
@@ -74,5 +69,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd uup
-          gh release delete v29695 --cleanup-tag --yes || true
-          gh release create v29695 --title "Win11 29695.1001" --notes "UUP dump build 29695.1001" win11.iso.part-* SHA256SUMS.txt
+          TAG="v$(TZ='Asia/Shanghai' date +%Y%m%d-%H%M)-run${{ github.run_number }}"
+          gh release create "$TAG" --title "Win11 ISO ($TAG)" --notes "Auto build by GitHub Actions" win11.iso.part-* SHA256SUMS.txt
