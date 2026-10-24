@@ -30,15 +30,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cabextract wimtools genisoimage chntpw aria2 unzip xorriso
 
-      - name: Replace genisoimage with xorriso (supports >4GB files)
+      - name: Patch genisoimage to allow >4GB files
         run: |
-          # 把 genisoimage/mkisofs 程序本体换成转发脚本：
-          # 无论 uup 脚本在哪个文件里、以什么方式调用，实际执行的都是 xorriso
+          # uup 脚本的打包命令藏在运行时解压的工具包内，且调用时带 --udf（xorriso 不支持 UDF）
+          # 所以不换工具，而是给 genisoimage 套一层转发脚本，自动加上 -allow-limited-size 开关
           for name in genisoimage mkisofs; do
             if [ -e "/usr/bin/$name" ]; then
               sudo mv "/usr/bin/$name" "/usr/bin/$name.orig"
             fi
-            printf '#!/bin/bash\nexec xorriso -as mkisofs "$@"\n' | sudo tee "/usr/bin/$name" > /dev/null
+            printf '#!/bin/bash\nexec /usr/bin/%s.orig -allow-limited-size "$@"\n' "$name" | sudo tee "/usr/bin/$name" > /dev/null
             sudo chmod +x "/usr/bin/$name"
           done
           echo "== genisoimage 现在的内容（应为转发脚本） =="
@@ -50,7 +50,7 @@ jobs:
           cd uup
           chmod +x uup_download_linux.sh
           echo "== 引用 genisoimage 的位置（仅调试用） =="
-          grep -rnI "genisoimage" . 2>/dev/null | head -20 || echo "(无直接引用，调用藏在工具包内——已由上一步换二进制解决)"
+          grep -rnI "genisoimage" . 2>/dev/null | head -20 || echo "(无直接引用，调用藏在工具包内——已由上一步套转发脚本解决)"
           ./uup_download_linux.sh
 
       - name: Locate and split ISO
